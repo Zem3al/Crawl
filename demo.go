@@ -2,11 +2,19 @@ package main
 
 import (
 	"bytes"
+	"github.com/BurntSushi/toml"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
 	"fmt"
 )
+
+type config struct {
+	Path string
+}
 
 func FindDup(url string,list []string) bool {
 	for _,val := range  list {
@@ -17,54 +25,60 @@ func FindDup(url string,list []string) bool {
 	return false
 }
 
-func GetDir(array *[]string,dulicate *[]string,url string) {
+func GetDir(array []string,dulicate []string,url string) ([]string,[]string,error) {
 	response,err := http.Get(url)
 	if err != nil {
-		log.Print(err)
+		return array, dulicate, err
 	}
 	dir := []string{}
 	defer response.Body.Close()
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(response.Body)
 	newStr := buf.String()
-	lk := regexp.MustCompile(`\[DIR\](.*)`)
-	for _,val := range lk.FindAllString(newStr,-1) {
-		re := regexp.MustCompile("href=\".+?\"")
-		dir = append(dir,re.FindAllString(val, -1)...)
+	lk,err := regexp.Compile(`href="(\d{4}-\d{2}-\d{2}/)"`)
+	if err !=nil {
+		return array, dulicate, err
+	}
+	for _,val := range lk.FindAllStringSubmatch(newStr, -1) {
+		dir  = append(dir,val[1])
 	}
 	for _,val := range dir {
-		re := regexp.MustCompile("\"(.*)\"")
-		strin := url + re.FindStringSubmatch(val)[1]
-		if !FindDup(strin,*dulicate) {
-			*array = append(*array,strin)
-			*dulicate = append(*dulicate,strin)
+		strin := url + val
+		fmt.Println(strin)
+		if !FindDup(strin,dulicate) {
+			array = append(array,strin)
+			dulicate = append(dulicate,strin)
 		}
 	}
+	return array,dulicate,nil
 }
 
-func GetTxt(array *[]string,dulicate *[]string,url string) {
+func GetTxt(array []string,dulicate []string,url string) ([]string,[]string,error){
 	response,err := http.Get(url)
 	if err != nil {
-		log.Print(err)
+		return array, dulicate, err
 	}
 	dir := []string{}
 	defer response.Body.Close()
 	buf := new(bytes.Buffer)
 	buf.ReadFrom(response.Body)
 	newStr := buf.String()
-	lk := regexp.MustCompile(`\[TXT\](.*)`)
-	for _,val := range lk.FindAllString(newStr,-1) {
-		re := regexp.MustCompile("href=\".+?\"")
-		dir = append(dir,re.FindAllString(val, -1)...)
+	lk,err := regexp.Compile(`href="(.*.all\.txt?)"`)
+	if err !=nil {
+		return array, dulicate, err
+	}
+	for _,val := range lk.FindAllStringSubmatch(newStr, -1) {
+		dir  = append(dir,val[1])
 	}
 	for _,val := range dir {
-		re := regexp.MustCompile("\"(.*)\"")
-		strin := url + re.FindStringSubmatch(val)[1]
-		if !FindDup(strin,*dulicate) {
-			*array = append(*array,strin)
-			*dulicate = append(*dulicate,strin)
+		strin := url + val
+		fmt.Println(strin)
+		if !FindDup(strin,dulicate) {
+			array = append(array,strin)
+			dulicate = append(dulicate,strin)
 		}
 	}
+	return array,dulicate,nil
 }
 
 func remove(s []string, i int) []string {
@@ -73,25 +87,79 @@ func remove(s []string, i int) []string {
 	return s[:len(s)-1]
 }
 
+func CreateFolder(m map[string]string) (error){
+	for key,val := range m {
+		re1 := regexp.MustCompile("[0-9]+")
+		subPath := ""
+		for _,val := range re1.FindAllString(key,3) {
+			subPath = filepath.Join(subPath, val)
+		}
+		var userconfig config
+		if _, err := toml.DecodeFile("path.toml", &userconfig); err != nil {
+			return err
+		}
+		path := filepath.Join(userconfig.Path, subPath)
+		os.MkdirAll(path, os.ModePerm)
+		response,err := http.Get(val)
+		if err != nil {
+			log.Print(err)
+		}
+		defer response.Body.Close()
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(response.Body)
+		body := buf.Bytes()
+		re1 = regexp.MustCompile(`[0-9]+/(.*txt)`)
+		subPath = filepath.Join(subPath, val)
+		path = filepath.Join(path,re1.FindAllStringSubmatch(val,-1)[0][1])
+		fmt.Println(path)
+		_ = ioutil.WriteFile(path, body, 0755)
+
+	}
+	return nil
+}
+
 func main()  {
-	defaul := "https://malshare.com/daily"
+	defaul := "https://malshare.com/daily/"
 	dir := []string{}
 	text := []string{}
 	dup := []string{}
-	GetDir(&dir,&dup,defaul)
-	GetTxt(&text,&dup,defaul)
-	i :=1
+	dir,dup,err := GetDir(dir,dup,defaul)
+	if err != nil {
+		log.Println(err)
+	}
+	text,dup,err = GetTxt(text,dup,defaul)
+	if err != nil {
+		log.Println(err)
+	}
 	for {
-		fmt.Println(i)
-		i++
-		fmt.Println(len(dir))
+		fmt.Println("Lengt of dir", len(dir))
+		fmt.Println("Lengt of txt", len(text))
 		if len(dir) == 0 {
 			break
 		}
 		strin := dir[0]
-		dir = remove(dir,0)
-		GetDir(&dir,&dup,strin)
-		GetTxt(&text,&dup,strin)
+		dir = remove(dir, 0)
+		dir,dup,err = GetDir(dir,dup,strin)
+		if err != nil {
+			log.Println(err)
+		}
+		text,dup,err = GetTxt(text,dup,strin)
+		if err != nil {
+			log.Println(err)
+		}
 	}
-	fmt.Println(text)
+	m := make(map[string]string)
+	for _,val := range text {
+		fmt.Println(val)
+		re := regexp.MustCompile("[0-9]+-[0-9]+-[0-9]+/.*")
+		if len(re.FindAllString(val,-1)) < 0 {
+			m["0000-00-00"] = val
+		}
+		if len(re.FindAllString(val,-1)) > 0 {
+			m[re.FindAllString(val,-1)[0]] = val
+		}
+	}
+	fmt.Println(len(m))
+	fmt.Println(m)
+	CreateFolder(m)
 }
