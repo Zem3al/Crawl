@@ -1,0 +1,5 @@
+Default = "https://malshare.com/daily/"
+MongoDBHost = "127.0.0.1"
+MongoDBUser = ""
+MongoDBPwd  = ""
+Database    = "crawl"
